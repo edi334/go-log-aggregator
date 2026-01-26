@@ -1,0 +1,26 @@
+{
+  "sources": [
+    {
+      "name": "app-json",
+      "path": "logs/app.json.log",
+      "format": "json"
+    },
+    {
+      "name": "nginx-access",
+      "path": "logs/nginx.access.log",
+      "format": "nginx"
+    },
+    {
+      "name": "syslog",
+      "path": "logs/syslog.log",
+      "format": "syslog"
+    }
+  ],
+  "alerts": [
+    {
+      "name": "panic-detected",
+      "pattern": "panic|fatal",
+      "severity": "critical"
+    }
+  ]
+}
