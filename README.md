@@ -20,6 +20,20 @@ and emits structured JSON events to stdout.
 
 All filters are applied to the live stream.
 
+## Dashboard
+
+The web dashboard streams live events over SSE and lets you:
+
+- Select time windows (1m, 15m, 3h, 1d, 1w).
+- Toggle which sources to display.
+- See real-time updates in the same view.
+
+Run it:
+- `go run ./cmd/go-log-aggregator -config config/config.json -http-addr :8080`
+- Open `http://localhost:8080` in your browser.
+
+To disable the dashboard: `-http-addr ""`.
+
 ## Alerts
 
 Alert rules live in `config/config.json` under `alerts` and fire when the

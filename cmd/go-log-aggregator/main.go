@@ -18,6 +18,7 @@ import (
 	"go-log-aggregator/internal/filter"
 	"go-log-aggregator/internal/ingest"
 	"go-log-aggregator/internal/parse"
+	"go-log-aggregator/internal/web"
 )
 
 func main() {
@@ -27,12 +28,14 @@ func main() {
 	var sinceFilter string
 	var untilFilter string
 	var fieldFilters multiValue
+	var httpAddr string
 	flag.StringVar(&configPath, "config", "config/config.json", "path to config file")
 	flag.StringVar(&regexFilter, "regex", "", "regex filter applied to raw/message")
 	flag.StringVar(&severityFilter, "severity", "", "severity filter (info, warn, error, critical)")
 	flag.StringVar(&sinceFilter, "since", "", "only include logs since RFC3339 timestamp")
 	flag.StringVar(&untilFilter, "until", "", "only include logs until RFC3339 timestamp")
 	flag.Var(&fieldFilters, "field", "field filter key=value (repeatable)")
+	flag.StringVar(&httpAddr, "http-addr", ":8080", "http dashboard address (empty to disable)")
 	flag.Parse()
 
 	cfg, err := config.Load(configPath)
@@ -63,6 +66,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var hub *web.Hub
+	var store *web.Store
+	if httpAddr != "" {
+		hub = web.NewHub()
+		store = web.NewStore(7*24*time.Hour, 50000)
+		go hub.Run(ctx)
+		go func() {
+			if err := web.StartServer(ctx, httpAddr, hub, store, sourceNames(cfg.Sources)); err != nil {
+				log.Printf("http server: %v", err)
+			}
+		}()
+	}
+
 	events := make(chan ingest.Event, 128)
 	errs := make(chan error, 16)
 
@@ -88,6 +104,7 @@ func main() {
 					SourceName: event.SourceName,
 					SourcePath: event.SourcePath,
 					Format:     "unknown",
+					ReceivedAt: event.ReceivedAt,
 					Severity:   "unknown",
 					Message:    event.Line,
 					Raw:        event.Line,
@@ -98,7 +115,13 @@ func main() {
 				continue
 			}
 
-			printEvent(parsed)
+			webEvent, payload := toWebEvent(parsed)
+			if store != nil {
+				store.Add(webEvent)
+			}
+			if payload != nil && hub != nil {
+				hub.Broadcast(payload)
+			}
 			for _, match := range alerts.Evaluate(parsed) {
 				log.Printf("ALERT %s source=%s message=%s", match.RuleName, match.Event.SourceName, match.Event.Message)
 			}
@@ -172,33 +195,60 @@ func sourceFormat(sources []config.Source, name string) string {
 }
 
 type outputEvent struct {
-	Timestamp string            `json:"timestamp,omitempty"`
-	Severity  string            `json:"severity,omitempty"`
-	Message   string            `json:"message,omitempty"`
-	Source    string            `json:"source"`
-	Format    string            `json:"format,omitempty"`
-	Fields    map[string]string `json:"fields,omitempty"`
-	Raw       string            `json:"raw,omitempty"`
+	Timestamp  string            `json:"timestamp,omitempty"`
+	ReceivedAt string            `json:"received_at,omitempty"`
+	Severity   string            `json:"severity,omitempty"`
+	Message    string            `json:"message,omitempty"`
+	Source     string            `json:"source"`
+	Format     string            `json:"format,omitempty"`
+	Fields     map[string]string `json:"fields,omitempty"`
+	Raw        string            `json:"raw,omitempty"`
 }
 
-func printEvent(event parse.StructuredEvent) {
-	out := outputEvent{
-		Severity: event.Severity,
-		Message:  event.Message,
-		Source:   event.SourceName,
-		Format:   event.Format,
-		Fields:   event.Fields,
-		Raw:      event.Raw,
+func toWebEvent(event parse.StructuredEvent) (web.Event, []byte) {
+	eventTime := event.Timestamp
+	if eventTime.IsZero() {
+		eventTime = event.ReceivedAt
 	}
-	if !event.Timestamp.IsZero() {
-		out.Timestamp = event.Timestamp.Format(time.RFC3339)
+
+	webEvent := web.Event{
+		Timestamp:  eventTime,
+		ReceivedAt: event.ReceivedAt,
+		Severity:   event.Severity,
+		Message:    event.Message,
+		Source:     event.SourceName,
+		Format:     event.Format,
+		Fields:     event.Fields,
+		Raw:        event.Raw,
+	}
+
+	out := outputEvent{
+		Severity:   webEvent.Severity,
+		Message:    webEvent.Message,
+		Source:     webEvent.Source,
+		Format:     webEvent.Format,
+		Fields:     webEvent.Fields,
+		Raw:        webEvent.Raw,
+		ReceivedAt: webEvent.ReceivedAt.Format(time.RFC3339),
+	}
+	if !webEvent.Timestamp.IsZero() {
+		out.Timestamp = webEvent.Timestamp.Format(time.RFC3339)
 	}
 
 	data, err := json.Marshal(out)
 	if err != nil {
 		log.Printf("marshal output: %v", err)
-		return
+		return webEvent, nil
 	}
 
 	fmt.Fprintln(os.Stdout, string(data))
+	return webEvent, data
+}
+
+func sourceNames(sources []config.Source) []string {
+	out := make([]string, 0, len(sources))
+	for _, src := range sources {
+		out = append(out, src.Name)
+	}
+	return out
 }

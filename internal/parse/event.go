@@ -7,6 +7,7 @@ type StructuredEvent struct {
 	SourcePath string
 	Format     string
 	Timestamp  time.Time
+	ReceivedAt time.Time
 	Severity   string
 	Message    string
 	Fields     map[string]string

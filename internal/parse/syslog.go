@@ -43,6 +43,7 @@ func parseSyslog(event ingest.Event) (StructuredEvent, error) {
 		SourcePath: event.SourcePath,
 		Format:     "syslog",
 		Timestamp:  timestamp,
+		ReceivedAt: event.ReceivedAt,
 		Severity:   severity,
 		Message:    message,
 		Fields:     fields,

@@ -46,6 +46,7 @@ func parseNginx(event ingest.Event) (StructuredEvent, error) {
 		SourcePath: event.SourcePath,
 		Format:     "nginx",
 		Timestamp:  timestamp,
+		ReceivedAt: event.ReceivedAt,
 		Severity:   severity,
 		Message:    message,
 		Fields:     fields,

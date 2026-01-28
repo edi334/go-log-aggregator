@@ -36,6 +36,7 @@ func parseJSON(event ingest.Event) (StructuredEvent, error) {
 		SourcePath: event.SourcePath,
 		Format:     "json",
 		Timestamp:  timestamp,
+		ReceivedAt: event.ReceivedAt,
 		Severity:   severity,
 		Message:    message,
 		Fields:     fields,
