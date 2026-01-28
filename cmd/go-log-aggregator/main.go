@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -29,6 +30,8 @@ func main() {
 	var untilFilter string
 	var fieldFilters multiValue
 	var httpAddr string
+	var backfill bool
+	var backfillLines int
 	flag.StringVar(&configPath, "config", "config/config.json", "path to config file")
 	flag.StringVar(&regexFilter, "regex", "", "regex filter applied to raw/message")
 	flag.StringVar(&severityFilter, "severity", "", "severity filter (info, warn, error, critical)")
@@ -36,6 +39,8 @@ func main() {
 	flag.StringVar(&untilFilter, "until", "", "only include logs until RFC3339 timestamp")
 	flag.Var(&fieldFilters, "field", "field filter key=value (repeatable)")
 	flag.StringVar(&httpAddr, "http-addr", ":8080", "http dashboard address (empty to disable)")
+	flag.BoolVar(&backfill, "backfill", true, "read existing log content on startup")
+	flag.IntVar(&backfillLines, "backfill-lines", 5000, "max lines per source to backfill (0 = no limit)")
 	flag.Parse()
 
 	cfg, err := config.Load(configPath)
@@ -82,6 +87,47 @@ func main() {
 	events := make(chan ingest.Event, 128)
 	errs := make(chan error, 16)
 
+	handleEvent := func(event ingest.Event) {
+		if strings.TrimSpace(event.Line) == "" {
+			return
+		}
+		parsed, err := parse.ParseLine(sourceFormat(cfg.Sources, event.SourceName), event)
+		if err != nil {
+			parsed = parse.StructuredEvent{
+				SourceName: event.SourceName,
+				SourcePath: event.SourcePath,
+				Format:     "unknown",
+				ReceivedAt: event.ReceivedAt,
+				Severity:   "unknown",
+				Message:    event.Line,
+				Raw:        event.Line,
+			}
+		}
+
+		if !criteria.Matches(parsed) {
+			return
+		}
+
+		webEvent, payload := toWebEvent(parsed)
+		if store != nil {
+			store.Add(webEvent)
+		}
+		if payload != nil && hub != nil {
+			hub.Broadcast(payload)
+		}
+		for _, match := range alerts.Evaluate(parsed) {
+			log.Printf("ALERT %s source=%s message=%s", match.RuleName, match.Event.SourceName, match.Event.Message)
+		}
+	}
+
+	if backfill {
+		for _, src := range cfg.Sources {
+			if err := backfillSource(src, backfillLines, handleEvent); err != nil {
+				log.Printf("backfill %s: %v", src.Name, err)
+			}
+		}
+	}
+
 	for _, src := range cfg.Sources {
 		if err := ingest.StartTailer(ctx, src, events, errs); err != nil {
 			log.Printf("start tailer %s: %v", src.Name, err)
@@ -98,33 +144,7 @@ func main() {
 				log.Printf("tailer error: %v", err)
 			}
 		case event := <-events:
-			parsed, err := parse.ParseLine(sourceFormat(cfg.Sources, event.SourceName), event)
-			if err != nil {
-				parsed = parse.StructuredEvent{
-					SourceName: event.SourceName,
-					SourcePath: event.SourcePath,
-					Format:     "unknown",
-					ReceivedAt: event.ReceivedAt,
-					Severity:   "unknown",
-					Message:    event.Line,
-					Raw:        event.Line,
-				}
-			}
-
-			if !criteria.Matches(parsed) {
-				continue
-			}
-
-			webEvent, payload := toWebEvent(parsed)
-			if store != nil {
-				store.Add(webEvent)
-			}
-			if payload != nil && hub != nil {
-				hub.Broadcast(payload)
-			}
-			for _, match := range alerts.Evaluate(parsed) {
-				log.Printf("ALERT %s source=%s message=%s", match.RuleName, match.Event.SourceName, match.Event.Message)
-			}
+			handleEvent(event)
 		}
 	}
 }
@@ -251,4 +271,34 @@ func sourceNames(sources []config.Source) []string {
 		out = append(out, src.Name)
 	}
 	return out
+}
+
+func backfillSource(source config.Source, limit int, handle func(ingest.Event)) error {
+	file, err := os.Open(source.Path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 2*1024*1024)
+
+	count := 0
+	for scanner.Scan() {
+		handle(ingest.Event{
+			SourceName: source.Name,
+			SourcePath: source.Path,
+			Line:       scanner.Text(),
+			ReceivedAt: time.Now(),
+		})
+		count++
+		if limit > 0 && count >= limit {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return nil
 }

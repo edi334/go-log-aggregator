@@ -34,6 +34,10 @@ Run it:
 
 To disable the dashboard: `-http-addr ""`.
 
+Backfill behavior:
+- By default, existing log content is read once on startup.
+- Control with `-backfill` and `-backfill-lines`.
+
 ## Alerts
 
 Alert rules live in `config/config.json` under `alerts` and fire when the
