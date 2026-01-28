@@ -1,3 +1,7 @@
 # Tests
 
-Integration and parser tests will live here.
+All unit tests live under `tests/` and target internal packages.
+
+Run:
+- `go test ./...`
+- `go test -v ./tests`

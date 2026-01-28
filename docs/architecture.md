@@ -10,7 +10,9 @@
 - Structured JSON is emitted to stdout for downstream consumers.
 - Live events are broadcast to the web dashboard over SSE.
 - Dashboard pulls recent events by source/window.
+- Startup backfill seeds the in-memory store for recent history.
 
 ## Planned pipeline
 
 - Add persistence, indexing, and historical queries.
+- Add server-side search endpoints for dashboard queries.

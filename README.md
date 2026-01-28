@@ -2,7 +2,7 @@
 
 Log aggregation playground built in parts. The current milestone tails
 configured log files, parses multiple formats, supports filters/regex,
-and emits structured JSON events to stdout.
+evaluates alerts, and serves a live dashboard with historical backfill.
 
 ## Run
 
@@ -46,4 +46,5 @@ the `ALERT` prefix.
 
 ## Next
 
-- Web dashboard with live stream.
+- Persist events to disk for longer history.
+- Add server-side search endpoints for dashboard queries.
