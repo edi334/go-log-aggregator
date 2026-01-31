@@ -1,6 +1,6 @@
 # go-log-aggregator
 
-Log aggregation playground built in parts. The current milestone tails
+Log aggregation playground for ATAD. The current milestone tails
 configured log files, parses multiple formats, supports filters/regex,
 evaluates alerts, and serves a live dashboard with historical backfill.
 
